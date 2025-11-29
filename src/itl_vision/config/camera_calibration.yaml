@@ -10,19 +10,27 @@ calibration:
     
     # 窗口配置
     window:
-      main_width: 1440
-      main_height: 900
-      main_pos_x: 1920-1440
-      main_pos_y: 1080-900
-      roi_size: 400
+      width: 1440
+      height: 900
+      pos_x: 490 #1920-1440
+      pos_y: 180 #1080-900
+      roi_weight: 400
+      roi_height: 400
     
     # 图像处理配置
     image:
-      target_width: 1536
-      target_height: 1125
+      width: 1536
+      height: 1125
       scale_factor: 1.3333333333
+      roi_zoom_size: 100
     
     # 标定参数
     calibration:
       pnp_method: "EPNP"
-      output_path: "./config/out_matrix.yaml"
+      camera_params_path: "/home/chichu/Lidar/ITL_ws/src/itl_vision/config/camera_params.yaml"
+      output_path: "src/ilt_vison/config/out_matrix.yaml"
+
+    # 话题配置
+    topics:
+      image_topic: "image_raw"
+      compressed_topic: "compressed_image"
