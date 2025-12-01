@@ -91,7 +91,7 @@ private:
     
     void declare_calibration_params() {
         this->declare_parameter("calibration.pnp_method", "EPNP");
-        this->declare_parameter("calibration.output_path", "src/ilt_vison/config/out_matrix.yaml");
+        this->declare_parameter("calibration.output_path", "src/itl_vision/config/out_matrix.yaml");
         this->declare_parameter("calibration.camera_params_path", "/home/chichu/Lidar/ITL_ws/src/itl_vision/config/camera_params.yaml");
     }
     
@@ -236,6 +236,10 @@ private:
             auto display_image = calibrator_->getDisplayImage();
             if (!display_image.empty()) {
                 cv::imshow("calibrate", display_image);
+            }
+            auto roi_image = calibrator_->getRoiImage();
+            if (!roi_image.empty()) {
+                cv::imshow("ROI", roi_image);
             }
             has_new_image_ = false;
         }

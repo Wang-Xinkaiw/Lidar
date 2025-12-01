@@ -1,5 +1,6 @@
 #include "itl_vision/calibration/calibrate.h"
 #include <string>
+#include <sys/stat.h>
 #include <iostream>
 
 namespace itl_vision {
@@ -31,7 +32,11 @@ void CameraCalibrator::processImage(const cv::Mat& input_image) {
     
     if (is_calibrating_) {
         drawCalibrationUI();
-    } else {
+
+    if (adjusting_point_) {
+        updateRoiDisplay(current_adjust_x_, current_adjust_y_);
+    }} 
+    else {
         cv::putText(display_image_, "Press Enter to Calibrate", 
                    cv::Point(50, 200), cv::FONT_HERSHEY_SIMPLEX, 3, 
                    cv::Scalar(0, 0, 255), 2);
@@ -110,18 +115,6 @@ void CameraCalibrator::handleMouseEvent(int event, int x, int y, int flags) {
                 current_adjust_x_ = x;
                 current_adjust_y_ = y;
                 adjustPointWithKeyboard(current_adjust_x_, current_adjust_y_);
-                
-                // 应用缩放因子
-                int scaled_x = static_cast<int>(current_adjust_x_ * config_.image.scale_factor * 2);
-                int scaled_y = static_cast<int>(current_adjust_y_ * config_.image.scale_factor * 2);
-                
-                std::cout << "Selected point " << (picked_points_.size() + 1) 
-                          << ": x=" << scaled_x << " y=" << scaled_y << std::endl;
-                picked_points_.push_back(cv::Point2f(scaled_x, scaled_y));
-                
-                if (picked_points_.size() == world_points_.size()) {
-                    solvePnP();
-                }
             }
             break;
             
@@ -158,34 +151,78 @@ void CameraCalibrator::handleKeyEvent(int key) {
 
 void CameraCalibrator::adjustPointWithKeyboard(int& x, int& y) {
     adjusting_point_ = true;
-    int temp_key = 0;
+    std::cout << "Adjusting point " << (picked_points_.size() + 1) 
+              << ". Use WASD to move, N to confirm." << std::endl;
     
-    do {
-        updateRoiDisplay(x, y); // 确保ROI图像随调整更新
-        temp_key = cv::waitKey(10);
+    bool point_confirmed = false;
+    
+    while (!point_confirmed && adjusting_point_) {
+        // 更新ROI显示
+        updateRoiDisplay(x, y);
         
-        switch (temp_key) {
-            case 'w': case 'W':
-                y -= 1;
-                break;
-            case 'a': case 'A':
-                x -= 1;
-                break;
-            case 's': case 'S':
-                y += 1;
-                break;
-            case 'd': case 'D':
-                x += 1;
-                break;
+        // 在主图像上显示调整状态
+        display_image_ = current_image_.clone();
+        drawCalibrationUI();
+        
+        std::string adjust_text = "Adjusting point " + std::to_string(picked_points_.size() + 1);
+        cv::putText(display_image_, adjust_text, 
+                   cv::Point(50, 250), cv::FONT_HERSHEY_SIMPLEX, 1.0, 
+                   cv::Scalar(0, 255, 255), 2);
+        cv::putText(display_image_, "WASD: Move, N: Confirm", 
+                   cv::Point(50, 280), cv::FONT_HERSHEY_SIMPLEX, 1.0, 
+                   cv::Scalar(0, 255, 255), 2);
+        cv::putText(display_image_, "Position: x=" + std::to_string(x) + " y=" + std::to_string(y), 
+                   cv::Point(50, 310), cv::FONT_HERSHEY_SIMPLEX, 1.0, 
+                   cv::Scalar(0, 255, 255), 2);
+        
+        // 在主图像上标记当前调整点
+        cv::circle(display_image_, cv::Point(x, y), 8, cv::Scalar(0, 255, 255), 2);
+        cv::circle(display_image_, cv::Point(x, y), 2, cv::Scalar(0, 255, 255), -1);
+        
+        // 显示图像
+        cv::imshow("calibrate", display_image_);
+        if (!roi_image_.empty()) {
+            cv::imshow("ROI", roi_image_);
         }
         
-        // 边界检查
-        x = std::max(config_.image.roi_zoom_size, 
-                    std::min(x, current_image_.cols - config_.image.roi_zoom_size));
-        y = std::max(config_.image.roi_zoom_size, 
-                    std::min(y, current_image_.rows - config_.image.roi_zoom_size));
+        int key = cv::waitKey(30); // 等待按键
         
-    } while (temp_key != 'n' && temp_key != 'N');
+        switch (key) {
+            case 'w': case 'W':
+                y = std::max(config_.image.roi_zoom_size, y - 1);
+                break;
+            case 'a': case 'A':
+                x = std::max(config_.image.roi_zoom_size, x - 1);
+                break;
+            case 's': case 'S':
+                y = std::min(current_image_.rows - config_.image.roi_zoom_size, y + 1);
+                break;
+            case 'd': case 'D':
+                x = std::min(current_image_.cols - config_.image.roi_zoom_size, x + 1);
+                break;
+            case 'n': case 'N':
+                point_confirmed = true;
+                break;
+            case 27: // ESC
+                adjusting_point_ = false;
+                cancelCalibration();
+                return;
+        }
+    }
+    
+    if (point_confirmed) {
+        // 应用缩放因子并保存点
+        int scaled_x = static_cast<int>(x * config_.image.scale_factor * 2);
+        int scaled_y = static_cast<int>(y * config_.image.scale_factor * 2);
+        
+        std::cout << "Selected point " << (picked_points_.size() + 1) 
+                  << ": x=" << scaled_x << " y=" << scaled_y << std::endl;
+        picked_points_.push_back(cv::Point2f(scaled_x, scaled_y));
+        
+        if (picked_points_.size() == world_points_.size()) {
+            solvePnP();
+        }
+    }
     
     adjusting_point_ = false;
 }
@@ -220,10 +257,32 @@ void CameraCalibrator::updateRoiDisplay(int x, int y) {
                 cv::Point(center_x, center_y + 20), cv::Scalar(0, 0, 255), 2);
         cv::line(roi_image_, cv::Point(center_x - 20, center_y), 
                 cv::Point(center_x + 20, center_y), cv::Scalar(0, 0, 255), 2);
+            
+        std::string coord_text = "x:" + std::to_string(x) + " y:" + std::to_string(y);
+        cv::putText(roi_image_, coord_text, 
+                   cv::Point(10, 30), cv::FONT_HERSHEY_SIMPLEX, 0.7, 
+                   cv::Scalar(255, 255, 255), 2);
+    
     }
 }
 
 void CameraCalibrator::saveCalibrationResult() {
+    // 检查目录是否存在，不存在则创建
+    std::string output_dir = config_.output_path.substr(0, config_.output_path.find_last_of('/'));
+    
+    // 创建目录（如果不存在）
+    struct stat st;
+    if (stat(output_dir.c_str(), &st) == -1) {
+        // 目录不存在，创建它
+        std::string cmd = "mkdir -p " + output_dir;
+        int result = system(cmd.c_str());
+        if (result != 0) {
+            std::cerr << "Failed to create directory: " << output_dir << std::endl;
+            return;
+        }
+        std::cout << "Created directory: " << output_dir << std::endl;
+    }
+    
     cv::FileStorage fs(config_.output_path, cv::FileStorage::WRITE);
     if (!fs.isOpened()) {
         std::cerr << "Failed to open output file: " << config_.output_path << std::endl;
@@ -255,6 +314,19 @@ void CameraCalibrator::drawCalibrationUI() {
                cv::Point(50, 180), cv::FONT_HERSHEY_SIMPLEX, 1.0, 
                cv::Scalar(0, 0, 255), 2);
     
+    // 绘制已选择的点
+    for (size_t i = 0; i < picked_points_.size(); ++i) {
+        // 将缩放后的坐标转换回显示坐标
+        int display_x = static_cast<int>(picked_points_[i].x / (config_.image.scale_factor * 2));
+        int display_y = static_cast<int>(picked_points_[i].y / (config_.image.scale_factor * 2));
+        
+        cv::circle(display_image_, cv::Point(display_x, display_y), 10, 
+                  cv::Scalar(0, 255, 0), 2);
+        cv::putText(display_image_, std::to_string(i + 1), 
+                   cv::Point(display_x + 15, display_y - 15), 
+                   cv::FONT_HERSHEY_SIMPLEX, 0.8, cv::Scalar(0, 255, 0), 2);
+    }
+
     if (calibration_complete_) {
         cv::putText(display_image_, "Calibration complete! Exiting...", 
                    cv::Point(50, 250), cv::FONT_HERSHEY_SIMPLEX, 1.5, 

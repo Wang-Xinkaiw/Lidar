@@ -28,7 +28,7 @@ calibration:
     calibration:
       pnp_method: "EPNP"
       camera_params_path: "/home/chichu/Lidar/ITL_ws/src/itl_vision/config/camera_params.yaml"
-      output_path: "src/ilt_vison/config/out_matrix.yaml"
+      output_path: "src/itl_vision/config/out_matrix.yaml"
 
     # 话题配置
     topics:
